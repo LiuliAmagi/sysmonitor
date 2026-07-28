@@ -186,9 +186,13 @@ function parseNpuSmiInfo(stdout) {
   const devices = [];
   const lines = stdout.split('\n');
   let cur = null;
+  let inDeviceSection = false;
   for (const line of lines) {
     const t = line.trim();
-    if (t.startsWith('|') && !t.includes('---') && !t.includes('===') && !t.includes('npu-smi')) {
+    // Detect table section by header row
+    if (t.startsWith('|') && /NPU\b.*\bName/.test(t) && /Power|Temp/.test(t)) { inDeviceSection = true; continue; }
+    if (t.startsWith('|') && /Process\s+id/i.test(t)) { inDeviceSection = false; continue; }
+    if (t.startsWith('|') && inDeviceSection && !t.includes('---') && !t.includes('===') && !t.includes('npu-smi')) {
       const rawCells = t.split('|').map(s => s.trim()).filter(Boolean);
       // npu-smi table has 3 major columns; data fields within each column are space-separated
       if (rawCells.length >= 1 && /^\d/.test(rawCells[0])) {
@@ -196,11 +200,13 @@ function parseNpuSmiInfo(stdout) {
         const c2 = rawCells[1] || '';  // "HEALTH" or "BUS_ID"
         const c3 = rawCells[2] || '';  // "POWER TEMP HUGE_PAGES" or "AICORE MEM HBM"
         const c1Parts = c1.split(/\s{2,}/);
+        // Normalize spaces around '/' to prevent ratio values from being split
+        const splitFields = (s) => s.replace(/\s*\/\s*/g, '/').split(/\s{2,}/).map(x => x.trim());
         if (c1Parts.length >= 2 && /^\d+$/.test(c1Parts[0].trim())) {
           // First line of device: [NPU_ID, Name], [Health], [Power, Temp, Hugepages_or_Memory]
           if (cur) devices.push(cur);
           const name = c1Parts.slice(1).join(' ').trim();
-          const c3Fields = c3.split(/\s{2,}/).map(s => s.trim());
+          const c3Fields = splitFields(c3);
           const power = parseFloat(c3Fields[0]) || 0;
           const temp = parseInt(c3Fields[1]) || 0;
           const memStr = c3Fields[2] || '';
@@ -213,7 +219,7 @@ function parseNpuSmiInfo(stdout) {
           };
         } else if (cur && /^\d+$/.test(c1.trim())) {
           // Second line of device: [Chip_ID], [Bus_ID], [AICore%, Mem_Used/Mem_Total, HBM_Used/HBM_Total]
-          const c3Fields = c3.split(/\s{2,}/).map(s => s.trim());
+          const c3Fields = splitFields(c3);
           const aiCore = parseInt(c3Fields[0]) || 0;
           if (aiCore > 0) cur.util = aiCore;
           const memStr2 = c3Fields[1] || '';
