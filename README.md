@@ -23,8 +23,8 @@ A lightweight VS Code / Cursor extension for monitoring system resources on **re
 | **Disk** | Mount points with progress bars, real-time R/W speed with sparkline, configurable filters |
 | **Network** | Upload & download speed, sparkline charts |
 | **SSH Traffic** | Upload & download through your SSH connection |
-| **GPU** | NVIDIA utilization, VRAM, temperature, power draw (multi-GPU) |
-| **GPU Picker** | Select idle GPUs, copy `CUDA_VISIBLE_DEVICES` with one click |
+| **Accelerators** | NVIDIA GPU, Huawei Ascend NPU, AMD GPU, Intel GPU, Google TPU — utilization, VRAM/HBM, temperature, power (multi-device) |
+| **Device Picker** | Select idle devices, copy the correct env var (`CUDA_VISIBLE_DEVICES`, `ASCEND_RT_VISIBLE_DEVICES`, etc.) with one click |
 | **Process Manager** | Sort by CPU / RAM / GPU, searchable, right-click to copy cell, row, or PID |
 | **Status Bar** | Customizable position, priority, and displayed metrics |
 | **Settings** | Built-in settings panel with live preview — no JSON editing needed |
@@ -112,6 +112,10 @@ All settings are accessible via the **Settings** button in the sidebar panel. Yo
 
 - Linux (remote or local)
 - NVIDIA GPU monitoring requires `nvidia-smi`
+- Ascend NPU monitoring requires `npu-smi`
+- AMD GPU monitoring requires `rocm-smi` or `amd-smi`
+- Intel GPU monitoring requires `intel_gpu_top` (from `intel-gpu-tools`)
+- TPU monitoring requires `tpu-info`
 - SSH traffic monitoring requires `ss` (remote connections only)
 
 ## Contributors

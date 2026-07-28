@@ -21,8 +21,8 @@
 | **磁盘** | 挂载点进度条，实时读写速率及迷你图表，可配置过滤 |
 | **网络** | 服务器上传下载速率、迷你折线图 |
 | **SSH 流量** | 你的 SSH 连接的上传下载 |
-| **GPU** | NVIDIA 利用率、显存、温度、功耗（多卡支持） |
-| **空闲 GPU 选择器** | 选取空闲卡，一键复制 `CUDA_VISIBLE_DEVICES` |
+| **加速设备** | NVIDIA GPU、华为昇腾 NPU、AMD GPU、Intel GPU、Google TPU — 利用率、显存/HBM、温度、功耗（多设备支持） |
+| **空闲设备选择器** | 选取空闲设备，一键复制对应的环境变量（`CUDA_VISIBLE_DEVICES`、`ASCEND_RT_VISIBLE_DEVICES` 等） |
 | **进程管理器** | CPU / 内存 / GPU 排序，搜索，右键复制单元格、整行或 PID |
 | **状态栏** | 可配置位置、优先级和显示指标 |
 | **设置** | 内置设置面板，实时预览，无需编辑 JSON |
@@ -110,9 +110,11 @@
 
 - Linux（远程或本地）
 - NVIDIA GPU 监控需要 `nvidia-smi`
+- 昇腾 NPU 监控需要 `npu-smi`
+- AMD GPU 监控需要 `rocm-smi` 或 `amd-smi`
+- Intel GPU 监控需要 `intel_gpu_top`（来自 `intel-gpu-tools`）
+- TPU 监控需要 `tpu-info`
 - SSH 流量监控需要 `ss`（仅远程连接）
-
-## 贡献者
 
 ## 贡献者
 

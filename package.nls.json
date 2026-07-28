@@ -1,6 +1,6 @@
 {
   "displayName": "System Monitor",
-  "description": "Remote/Local Linux system monitor — CPU / GPU / RAM / Network",
+  "description": "Remote/Local Linux system monitor — CPU / GPU / NPU / RAM / Network (NVIDIA, Ascend, AMD, Intel, TPU)",
   "viewTitle": "System Monitor",
   "viewName": "System Monitor",
   "procsName": "Processes",

@@ -2,17 +2,17 @@
   "name": "sysmonitor",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "publisher": "LiChenxi",
   "license": "MIT",
   "icon": "icon.png",
-  "homepage": "https://github.com/lcx-0504/sysmonitor",
+  "homepage": "https://github.com/LiuliAmagi/sysmonitor",
   "bugs": {
-    "url": "https://github.com/lcx-0504/sysmonitor/issues"
+    "url": "https://github.com/LiuliAmagi/sysmonitor/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/lcx-0504/sysmonitor.git"
+    "url": "https://github.com/LiuliAmagi/sysmonitor.git"
   },
   "engines": {
     "vscode": "^1.70.0"
@@ -27,6 +27,11 @@
     "monitor",
     "cpu",
     "gpu",
+    "npu",
+    "ascend",
+    "amd",
+    "tpu",
+    "accelerator",
     "remote"
   ],
   "activationEvents": [

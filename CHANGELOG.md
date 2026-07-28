@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0 — 2026-07-28
+
+- **Multi-accelerator support**: Refactored GPU monitoring into a provider-based architecture, now supporting NVIDIA GPU, Huawei Ascend NPU, AMD GPU (rocm-smi / amd-smi), Intel GPU (intel_gpu_top / sysfs), and Google TPU (tpu-info). All providers run in parallel and aggregate into a unified device list.
+- **Ascend NPU monitoring**: Full support for `npu-smi info` table and key-value output formats, including AICore utilization, HBM/Memory usage, temperature, and power.
+- **Dynamic UI labels**: Accelerator card headers now dynamically display device type (GPU / NPU / TPU) based on detected hardware.
+- **Smart env var copy**: The "Copy Env Var" button now uses the correct environment variable per device type (`CUDA_VISIBLE_DEVICES`, `ASCEND_RT_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `INTEL_VISIBLE_DEVICES`, `TPU_VISIBLE_DEVICES`).
+- **Race condition fix**: Fixed async index offset bug in multi-provider aggregation by using per-provider result slots.
+
 ## 1.2.0 — 2026-04-16
 
 - **Fully async GPU pipeline**: All `nvidia-smi` calls are now non-blocking. GPU panel shows “Loading…” on first open, then data appears within seconds via instant callback. Merged UUID mapping into a single GPU query (2-step chain instead of 3). No more `execFileSync` — zero tick blocking from the very first frame. Inspired by @klay7w’s PR #1.

@@ -25,11 +25,19 @@ let _prevDiskCount = -1;
 let _gpuCache = [];
 let _gpuCacheTime = 0;
 let _gpuState = '';
-let _onGpuReady = null;   // one-shot callback when GPU data first arrives
+let _onGpuReady = null;   // one-shot callback when accelerator data first arrives
 let _onChainDone = null;  // one-shot callback when first full chain completes
 
 let _smiChainRunning = false;
 const GPU_CACHE_TTL = 30000;
+
+// ── Multi-Accelerator Provider Architecture ──────────────────────────────────
+// Each provider: { type, label, envVar, icon, detect(), getDevices(cb), getProcInfo(cb) }
+// Unified device format: { idx, name, util, memUsed, memTotal, temp, power, uuid, type, devType }
+let _accelProviders = [];
+let _accelInitialized = false;
+let _accelProcMap = {};    // pid → [{idx, vram, memTotal, type}]
+let _accelMyIndices = [];  // indices of devices used by current user
 function dbg(msg) { if (_log) _log.appendLine('[' + new Date().toISOString().slice(11, 23) + '] ' + msg); }
 
 function getCpuPercent() {
@@ -108,10 +116,13 @@ function getDiskIO() {
   } catch { return { r: 0, w: 0 }; }
 }
 
-const GPU_SMI_ARGS = ['--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,gpu_uuid',
+// ── NVIDIA GPU Provider ─────────────────────────────────────────────────────
+const NVIDIA_SMI_ARGS = ['--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,gpu_uuid',
   '--format=csv,noheader,nounits'];
+let _nvidiaUuidToIdx = {};
+let _nvidiaUuidToMem = {};
 
-function parseGpuCsv(stdout) {
+function parseNvidiaCsv(stdout) {
   return stdout.trim().split('\n').filter(Boolean).map(line => {
     const [idx, name, util, memUsed, memTotal, temp, pd, pl, uuid] = line.split(',').map(s => s.trim());
     return {
@@ -119,52 +130,43 @@ function parseGpuCsv(stdout) {
       util: parseInt(util), memUsed: parseInt(memUsed), memTotal: parseInt(memTotal),
       temp: parseInt(temp),
       power: isNaN(parseFloat(pd)) ? null : { draw: parseFloat(pd).toFixed(0), limit: parseFloat(pl).toFixed(0) },
+      type: 'nvidia', devType: 'GPU',
     };
   });
 }
 
-// Unified async chain: GPU stats + UUID mapping → compute apps
-function refreshGpuChain() {
-  if (_smiChainRunning) return;
-  _smiChainRunning = true;
-  // Step 1: GPU stats
-  execFile('nvidia-smi', GPU_SMI_ARGS, { timeout: 15000 }, (err, stdout) => {
-    if (err) {
-      const s = _gpuCache.length > 0 ? 'fallback' : 'unavailable';
-      if (s !== _gpuState) { dbg('gpu snapshot ' + s + ': ' + (err.message || err)); _gpuState = s; }
-    } else {
+const NvidiaProvider = {
+  type: 'nvidia', label: 'NVIDIA GPU', envVar: 'CUDA_VISIBLE_DEVICES', icon: '$(circuit-board)',
+  detect() {
+    try { return execSync('which nvidia-smi 2>/dev/null', { timeout: 2000 }).toString().trim().length > 0; } catch { return false; }
+  },
+  getDevices(cb) {
+    execFile('nvidia-smi', NVIDIA_SMI_ARGS, { timeout: 15000 }, (err, stdout) => {
+      if (err) return cb(err, []);
       try {
-        const parsed = parseGpuCsv(stdout);
-        if (parsed.length > 0 || _gpuCache.length === 0) {
-          _gpuCache = parsed;
-          _gpuCacheTime = Date.now();
-          // Build UUID→index/memTotal maps from Step 1 output (eliminates Step 3)
-          _uuidToIdx = {}; _uuidToMem = {};
-          for (const g of parsed) { _uuidToIdx[g.uuid] = g.idx; _uuidToMem[g.uuid] = g.memTotal; }
-        }
-        if (_gpuState !== 'fresh') { dbg('gpu snapshot fresh (' + _gpuCache.length + ' gpus)'); _gpuState = 'fresh'; }
-        if (_onGpuReady) { _onGpuReady(); _onGpuReady = null; }
-      } catch (e) {
-        if (_gpuState !== 'parse-error') { dbg('gpu parse error: ' + e.message); _gpuState = 'parse-error'; }
-      }
-    }
-    // Step 2: compute apps (for process GPU tags) — UUID mapping comes from Step 1
+        const parsed = parseNvidiaCsv(stdout);
+        _nvidiaUuidToIdx = {}; _nvidiaUuidToMem = {};
+        for (const g of parsed) { _nvidiaUuidToIdx[g.uuid] = g.idx; _nvidiaUuidToMem[g.uuid] = g.memTotal; }
+        cb(null, parsed);
+      } catch (e) { cb(e, []); }
+    });
+  },
+  getProcInfo(cb) {
     execFile('nvidia-smi',
       ['--query-compute-apps=pid,gpu_uuid,used_memory', '--format=csv,noheader,nounits'],
-      { timeout: 15000 }, (err2, appOut) => {
-        _smiChainRunning = false;
-        if (err2 || !appOut.trim()) return;
+      { timeout: 15000 }, (err, stdout) => {
+        if (err || !stdout.trim()) return cb(null, { map: {}, myIndices: [] });
         const gpuMap = {};
         const myUuids = new Set();
         const uid = process.getuid();
-        for (const line of appOut.trim().split('\n').filter(Boolean)) {
+        for (const line of stdout.trim().split('\n').filter(Boolean)) {
           const parts = line.split(',').map(s => s.trim());
           const pid = parseInt(parts[0]);
           const uuid = parts[1] || '';
           const vram = parseInt(parts[2]) || 0;
           if (pid) {
             if (!gpuMap[pid]) gpuMap[pid] = [];
-            gpuMap[pid].push({ idx: _uuidToIdx[uuid] !== undefined ? _uuidToIdx[uuid] : -1, vram, memTotal: _uuidToMem[uuid] || 0 });
+            gpuMap[pid].push({ idx: _nvidiaUuidToIdx[uuid] !== undefined ? _nvidiaUuidToIdx[uuid] : -1, vram, memTotal: _nvidiaUuidToMem[uuid] || 0, type: 'nvidia' });
             try {
               const status = fs.readFileSync('/proc/' + pid + '/status', 'utf8');
               const m = status.match(/Uid:\s+(\d+)/);
@@ -172,19 +174,421 @@ function refreshGpuChain() {
             } catch { }
           }
         }
-        _gpuProcMap = gpuMap;
-        _gpuMyIndices = [...myUuids].map(u => _uuidToIdx[u]).filter(i => i !== undefined).sort((a, b) => a - b);
-        if (_onChainDone) { _onChainDone(); _onChainDone = null; }
+        const myIndices = [...myUuids].map(u => _nvidiaUuidToIdx[u]).filter(i => i !== undefined).sort((a, b) => a - b);
+        cb(null, { map: gpuMap, myIndices });
       }
     );
+  }
+};
+
+// ── Huawei Ascend NPU Provider ───────────────────────────────────────────────
+function parseNpuSmiInfo(stdout) {
+  const devices = [];
+  const lines = stdout.split('\n');
+  let cur = null;
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith('|') && !t.includes('---') && !t.includes('===') && !t.includes('npu-smi')) {
+      const rawCells = t.split('|').map(s => s.trim()).filter(Boolean);
+      // npu-smi table has 3 major columns; data fields within each column are space-separated
+      if (rawCells.length >= 1 && /^\d/.test(rawCells[0])) {
+        const c1 = rawCells[0] || '';  // "NPU_ID NAME" or "CHIP_ID"
+        const c2 = rawCells[1] || '';  // "HEALTH" or "BUS_ID"
+        const c3 = rawCells[2] || '';  // "POWER TEMP HUGE_PAGES" or "AICORE MEM HBM"
+        const c1Parts = c1.split(/\s{2,}/);
+        if (c1Parts.length >= 2 && /^\d+$/.test(c1Parts[0].trim())) {
+          // First line of device: [NPU_ID, Name], [Health], [Power, Temp, Hugepages_or_Memory]
+          if (cur) devices.push(cur);
+          const name = c1Parts.slice(1).join(' ').trim();
+          const c3Fields = c3.split(/\s{2,}/).map(s => s.trim());
+          const power = parseFloat(c3Fields[0]) || 0;
+          const temp = parseInt(c3Fields[1]) || 0;
+          const memStr = c3Fields[2] || '';
+          const memParts = memStr.split('/').map(s => parseInt(s.trim()) || 0);
+          cur = {
+            idx: parseInt(c1Parts[0].trim()), name: name || 'Ascend', util: 0,
+            memUsed: memParts[0] || 0, memTotal: memParts[1] || 0, temp,
+            power: { draw: power.toFixed(0), limit: '?' },
+            type: 'ascend', devType: 'NPU', uuid: '',
+          };
+        } else if (cur && /^\d+$/.test(c1.trim())) {
+          // Second line of device: [Chip_ID], [Bus_ID], [AICore%, Mem_Used/Mem_Total, HBM_Used/HBM_Total]
+          const c3Fields = c3.split(/\s{2,}/).map(s => s.trim());
+          const aiCore = parseInt(c3Fields[0]) || 0;
+          if (aiCore > 0) cur.util = aiCore;
+          const memStr2 = c3Fields[1] || '';
+          const memParts2 = memStr2.split('/').map(s => parseInt(s.trim()) || 0);
+          if (memParts2.length >= 2 && memParts2[1] > 0) { cur.memUsed = memParts2[0]; cur.memTotal = memParts2[1]; }
+          const hbmStr = c3Fields[2] || '';
+          const hbmParts = hbmStr.split('/').map(s => parseInt(s.trim()) || 0);
+          if (hbmParts.length >= 2 && hbmParts[1] > 0) { cur.memUsed = hbmParts[0]; cur.memTotal = hbmParts[1]; }
+        }
+      }
+    }
+    // Key-value format (npu-smi info -i N)
+    const kvMatch = line.match(/^\s*(.+?):\s+(.+)$/);
+    if (kvMatch) {
+      const [, k, v] = kvMatch;
+      const key = k.trim(), val = v.trim();
+      if (key === 'NPU ID') { if (cur) devices.push(cur); cur = { idx: parseInt(val), name: 'Ascend', util: 0, memUsed: 0, memTotal: 0, temp: 0, power: null, type: 'ascend', devType: 'NPU', uuid: '' }; }
+      if (cur) {
+        if (key === 'NPU Name' || key === 'Product Name') cur.name = val;
+        if (key === 'AI Core(%)' || key === 'AICore(%)') cur.util = parseInt(val) || 0;
+        if (key === 'Temperature(C)' || key === 'Temp(C)') cur.temp = parseInt(val) || 0;
+        if (key === 'Power(W)' || key === 'Power') cur.power = { draw: (parseFloat(val) || 0).toFixed(0), limit: '?' };
+        if (key.includes('HBM-Usage') || key.includes('Memory-Usage')) {
+          const mp = val.split('/').map(s => parseInt(s.trim()) || 0);
+          if (mp.length >= 2) { cur.memUsed = mp[0]; cur.memTotal = mp[1]; }
+        }
+      }
+    }
+  }
+  if (cur) devices.push(cur);
+  return devices;
+}
+
+const AscendProvider = {
+  type: 'ascend', label: 'Ascend NPU', envVar: 'ASCEND_RT_VISIBLE_DEVICES', icon: '$(circuit-board)',
+  detect() {
+    try { return execSync('which npu-smi 2>/dev/null', { timeout: 2000 }).toString().trim().length > 0; } catch { return false; }
+  },
+  getDevices(cb) {
+    execFile('npu-smi', ['info'], { timeout: 15000 }, (err, stdout) => {
+      if (err) return cb(err, []);
+      try { cb(null, parseNpuSmiInfo(stdout || '')); } catch (e) { cb(e, []); }
+    });
+  },
+  getProcInfo(cb) {
+    // npu-smi info -t proc provides per-device process info
+    execFile('npu-smi', ['info', '-t', 'proc'], { timeout: 10000 }, (err, stdout) => {
+      if (err || !stdout) return cb(null, { map: {}, myIndices: [] });
+      // Parse process info: look for PID lines
+      const gpuMap = {};
+      const myIndices = [];
+      const uid = process.getuid();
+      const procLines = (stdout || '').split('\n');
+      let curNpuIdx = -1;
+      for (const line of procLines) {
+        const npuMatch = line.match(/NPU\s*(?:ID)?\s*[:\s]\s*(\d+)/i);
+        if (npuMatch) curNpuIdx = parseInt(npuMatch[1]);
+        const pidMatch = line.match(/^\s*(\d+)\s+(\S+)/);
+        if (pidMatch && curNpuIdx >= 0) {
+          const pid = parseInt(pidMatch[1]);
+          if (pid > 0) {
+            if (!gpuMap[pid]) gpuMap[pid] = [];
+            gpuMap[pid].push({ idx: curNpuIdx, vram: 0, memTotal: 0, type: 'ascend' });
+            try {
+              const status = fs.readFileSync('/proc/' + pid + '/status', 'utf8');
+              const m = status.match(/Uid:\s+(\d+)/);
+              if (m && parseInt(m[1]) === uid && !myIndices.includes(curNpuIdx)) myIndices.push(curNpuIdx);
+            } catch { }
+          }
+        }
+      }
+      cb(null, { map: gpuMap, myIndices: myIndices.sort((a, b) => a - b) });
+    });
+  }
+};
+
+// ── AMD GPU Provider ────────────────────────────────────────────────────────
+function parseRocmSmiJson(stdout) {
+  const devices = [];
+  try {
+    const data = JSON.parse(stdout);
+    const cards = Object.keys(data).filter(k => k.startsWith('card'));
+    cards.forEach((card, i) => {
+      const d = data[card];
+      const memUsed = parseInt(d['VRAM Total Used Memory (MB)']) || 0;
+      const memTotal = parseInt(d['VRAM Total Memory (MB)']) || 0;
+      devices.push({
+        idx: i, name: d['Card Series'] || d['Card Model'] || card,
+        util: parseInt(d['GPU Use (%)']) || 0, memUsed, memTotal,
+        temp: parseInt(d['Temperature (Sensor edge)']) || parseInt(d['Temperature (Sensor junction)']) || 0,
+        power: d['Average Graphics Package Power (W)'] ? { draw: parseFloat(d['Average Graphics Package Power (W)']).toFixed(0), limit: '?' } : null,
+        type: 'amd', devType: 'GPU', uuid: card,
+      });
+    });
+  } catch {
+    // Fallback: parse text output
+    let cur = null;
+    for (const line of stdout.split('\n')) {
+      const gpuMatch = line.match(/GPU\[(\d+)\]/);
+      if (gpuMatch) {
+        const idx = parseInt(gpuMatch[1]);
+        if (!devices.find(d => d.idx === idx)) {
+          devices.push({ idx, name: 'AMD GPU', util: 0, memUsed: 0, memTotal: 0, temp: 0, power: null, type: 'amd', devType: 'GPU', uuid: '' });
+        }
+        const dev = devices.find(d => d.idx === idx);
+        if (line.includes('GPU use (%)')) { const m = line.match(/:\s*(\d+)/); if (m) dev.util = parseInt(m[1]); }
+        if (line.includes('VRAM Total Used')) { const m = line.match(/:\s*(\d+)/); if (m) dev.memUsed = parseInt(m[1]); }
+        if (line.includes('VRAM Total Memory')) { const m = line.match(/:\s*(\d+)/); if (m) dev.memTotal = parseInt(m[1]); }
+        if (line.includes('Temperature (Sensor edge)') || line.includes('Temperature (Sensor junction)')) { const m = line.match(/:\s*(\d+)/); if (m && dev.temp === 0) dev.temp = parseInt(m[1]); }
+        if (line.includes('Average Graphics Package Power')) { const m = line.match(/:\s*([\d.]+)/); if (m) dev.power = { draw: parseFloat(m[1]).toFixed(0), limit: '?' }; }
+      }
+    }
+  }
+  return devices;
+}
+
+const AmdProvider = {
+  type: 'amd', label: 'AMD GPU', envVar: 'ROCR_VISIBLE_DEVICES', icon: '$(circuit-board)',
+  detect() {
+    try {
+      const hasRocm = execSync('which rocm-smi 2>/dev/null', { timeout: 2000 }).toString().trim().length > 0;
+      if (hasRocm) return true;
+      return execSync('which amd-smi 2>/dev/null', { timeout: 2000 }).toString().trim().length > 0;
+    } catch { return false; }
+  },
+  getDevices(cb) {
+    // Try amd-smi first (newer), then rocm-smi
+    execFile('amd-smi', ['metric', '--json'], { timeout: 15000 }, (err, stdout) => {
+      if (!err && stdout && stdout.trim()) {
+        try {
+          const data = JSON.parse(stdout);
+          const devices = (data || []).map((d, i) => ({
+            idx: i, name: d.product_name || d.market_name || 'AMD GPU',
+            util: parseInt(d.gpu_activity) || 0,
+            memUsed: parseInt((d.vram_total_used || 0)) || 0,
+            memTotal: parseInt((d.vram_total || 0)) || 0,
+            temp: parseInt(d.temperature?.edge_current || d.temperature?.junction_current || 0) || 0,
+            power: d.average_socket_power ? { draw: parseFloat(d.average_socket_power).toFixed(0), limit: '?' } : null,
+            type: 'amd', devType: 'GPU', uuid: 'amd-' + i,
+          }));
+          return cb(null, devices);
+        } catch (e) { /* fallback to rocm-smi */ }
+      }
+      execFile('rocm-smi', ['--showproductname', '--showmeminfo', 'vram', '--showuse', '--showtemp', '--showpower', '--json'], { timeout: 15000 }, (err2, stdout2) => {
+        if (err2) return cb(err2, []);
+        try { cb(null, parseRocmSmiJson(stdout2 || '')); } catch (e) { cb(e, []); }
+      });
+    });
+  },
+  getProcInfo(cb) {
+    // rocm-smi --showpids gives process info
+    execFile('rocm-smi', ['--showpids', '--json'], { timeout: 10000 }, (err, stdout) => {
+      if (err || !stdout) return cb(null, { map: {}, myIndices: [] });
+      try {
+        const data = JSON.parse(stdout);
+        const gpuMap = {};
+        Object.keys(data).filter(k => k.startsWith('card')).forEach(card => {
+          const idx = parseInt(card.replace('card', '')) || 0;
+          const procs = data[card]?.['PID'] ? [data[card]] : [];
+          for (const p of procs) {
+            const pid = parseInt(p.PID);
+            if (pid > 0) {
+              if (!gpuMap[pid]) gpuMap[pid] = [];
+              gpuMap[pid].push({ idx, vram: parseInt(p['Used Memory']) || 0, memTotal: 0, type: 'amd' });
+            }
+          }
+        });
+        cb(null, { map: gpuMap, myIndices: [] });
+      } catch { cb(null, { map: {}, myIndices: [] }); }
+    });
+  }
+};
+
+// ── Intel GPU Provider ──────────────────────────────────────────────────────
+function parseIntelDrm() {
+  const devices = [];
+  try {
+    const drmPaths = execSync('ls -d /sys/class/drm/card[0-9]* 2>/dev/null', { timeout: 3000 }).toString().trim().split('\n');
+    let idx = 0;
+    for (const p of drmPaths) {
+      const devPath = p + '/device';
+      let name = 'Intel GPU';
+      try { name = fs.readFileSync(devPath + '/label', 'utf8').trim() || name; } catch { }
+      try {
+        const vendor = fs.readFileSync(devPath + '/vendor', 'utf8').trim();
+        if (!vendor.includes('0x8086')) continue; // Only Intel
+      } catch { continue; }
+      devices.push({ idx: idx++, name, util: 0, memUsed: 0, memTotal: 0, temp: 0, power: null, type: 'intel', devType: 'GPU', uuid: 'intel-' + idx });
+    }
+  } catch { }
+  return devices;
+}
+
+const IntelProvider = {
+  type: 'intel', label: 'Intel GPU', envVar: 'INTEL_VISIBLE_DEVICES', icon: '$(circuit-board)',
+  detect() {
+    try {
+      const out = execSync('ls /sys/class/drm/card*/device/vendor 2>/dev/null', { timeout: 2000 }).toString();
+      for (const vf of out.trim().split('\n')) {
+        try { if (fs.readFileSync(vf, 'utf8').trim().includes('0x8086')) return true; } catch { }
+      }
+      return false;
+    } catch { return false; }
+  },
+  getDevices(cb) {
+    const baseDevices = parseIntelDrm();
+    // Try intel_gpu_top for utilization (runs briefly to get snapshot)
+    execFile('intel_gpu_top', ['-s', '500', '-d', 'ms'], { timeout: 8000 }, (err, stdout) => {
+      if (!err && stdout) {
+        // Parse intel_gpu_top output for engine utilization
+        for (const dev of baseDevices) {
+          const renderMatch = stdout.match(/RENDER\s+.*?(\d+\.?\d*)%/);
+          if (renderMatch) dev.util = Math.round(parseFloat(renderMatch[1]));
+        }
+      }
+      cb(null, baseDevices);
+    });
+  },
+  getProcInfo(cb) {
+    cb(null, { map: {}, myIndices: [] });
+  }
+};
+
+// ── Google TPU Provider ─────────────────────────────────────────────────────
+const TpuProvider = {
+  type: 'tpu', label: 'Google TPU', envVar: 'TPU_VISIBLE_DEVICES', icon: '$(circuit-board)',
+  detect() {
+    try {
+      // Check for TPU devices in /dev or tpu-info command
+      if (execSync('which tpu-info 2>/dev/null', { timeout: 2000 }).toString().trim().length > 0) return true;
+      return execSync('ls /dev/accel* 2>/dev/null', { timeout: 2000 }).toString().trim().length > 0;
+    } catch { return false; }
+  },
+  getDevices(cb) {
+    execFile('tpu-info', { timeout: 15000 }, (err, stdout) => {
+      if (err) {
+        // Fallback: check /dev/accel devices
+        try {
+          const accels = execSync('ls /dev/accel* 2>/dev/null', { timeout: 3000 }).toString().trim().split('\n').filter(Boolean);
+          const devices = accels.map((a, i) => ({
+            idx: i, name: 'TPU ' + a.split('/').pop(), util: 0, memUsed: 0, memTotal: 0,
+            temp: 0, power: null, type: 'tpu', devType: 'TPU', uuid: 'tpu-' + i,
+          }));
+          return cb(null, devices);
+        } catch { return cb(err, []); }
+      }
+      try {
+        // Parse tpu-info table output
+        const devices = [];
+        const lines = (stdout || '').split('\n');
+        let headerFound = false;
+        for (const line of lines) {
+          if (line.includes('Device') && line.includes('Memory usage') && line.includes('Duty cycle')) { headerFound = true; continue; }
+          if (!headerFound) continue;
+          const cells = line.split(/[│|]/).map(s => s.trim()).filter(Boolean);
+          if (cells.length >= 3) {
+            const idx = parseInt(cells[0]);
+            if (!isNaN(idx)) {
+              const memParts = (cells[1] || '').match(/([\d.]+)\s*\w*\s*\/\s*([\d.]+)\s*(\w*)/);
+              const memUsed = memParts ? parseFloat(memParts[1]) * (memParts[3]?.startsWith('G') ? 1024 : 1) : 0;
+              const memTotal = memParts ? parseFloat(memParts[2]) * (memParts[3]?.startsWith('G') ? 1024 : 1) : 0;
+              const dutyMatch = cells[2]?.match(/([\d.]+)/);
+              devices.push({
+                idx, name: 'TPU v' + (cells[0] || ''), util: dutyMatch ? Math.round(parseFloat(dutyMatch[1])) : 0,
+                memUsed: Math.round(memUsed), memTotal: Math.round(memTotal),
+                temp: 0, power: null, type: 'tpu', devType: 'TPU', uuid: 'tpu-' + idx,
+              });
+            }
+          }
+        }
+        cb(null, devices);
+      } catch (e) { cb(e, []); }
+    });
+  },
+  getProcInfo(cb) {
+    cb(null, { map: {}, myIndices: [] });
+  }
+};
+
+// ── Unified Accelerator Manager ──────────────────────────────────────────────
+const ALL_PROVIDERS = [NvidiaProvider, AscendProvider, AmdProvider, IntelProvider, TpuProvider];
+
+function detectProviders() {
+  _accelProviders = ALL_PROVIDERS.filter(p => { try { return p.detect(); } catch { return false; } });
+  _accelInitialized = true;
+  dbg('Accelerator providers detected: ' + (_accelProviders.length ? _accelProviders.map(p => p.label).join(', ') : 'none'));
+}
+
+function refreshGpuChain() {
+  if (_smiChainRunning) return;
+  if (!_accelInitialized) detectProviders();
+  if (_accelProviders.length === 0) {
+    if (_gpuState !== 'unavailable') { dbg('No accelerator providers detected'); _gpuState = 'unavailable'; }
+    _gpuCache = []; _gpuCacheTime = Date.now();
+    return;
+  }
+  _smiChainRunning = true;
+  // Aggregate devices from all detected providers
+  // Use per-provider result slots to avoid async race conditions with global index
+  const providerCount = _accelProviders.length;
+  const providerResults = new Array(providerCount).fill(null).map(() => ({ devices: [], procInfo: null }));
+  let pending = providerCount;
+
+  const finalizeAggregation = () => {
+    // Flatten results and assign global indices sequentially
+    const allDevices = [];
+    const allProcMaps = {};
+    const allMyIndices = [];
+    let globalOffset = 0;
+    for (let pi = 0; pi < providerCount; pi++) {
+      const result = providerResults[pi];
+      const provider = _accelProviders[pi];
+      for (const d of result.devices) {
+        d.idx = globalOffset + d.idx;
+        d._providerType = provider.type;
+        allDevices.push(d);
+      }
+      if (result.procInfo && result.procInfo.map) {
+        for (const pid of Object.keys(result.procInfo.map)) {
+          if (!allProcMaps[pid]) allProcMaps[pid] = [];
+          for (const g of result.procInfo.map[pid]) {
+            allProcMaps[pid].push({ ...g, idx: globalOffset + g.idx });
+          }
+        }
+      }
+      if (result.procInfo && result.procInfo.myIndices) {
+        for (const i of result.procInfo.myIndices) allMyIndices.push(globalOffset + i);
+      }
+      globalOffset += result.devices.length;
+    }
+    _smiChainRunning = false;
+    _gpuCache = allDevices;
+    _gpuCacheTime = Date.now();
+    _accelProcMap = allProcMaps;
+    _accelMyIndices = allMyIndices.sort((a, b) => a - b);
+    if (_gpuState !== 'fresh') { dbg('accelerator snapshot fresh (' + allDevices.length + ' devices from ' + _accelProviders.length + ' providers)'); _gpuState = 'fresh'; }
+    if (_onGpuReady) { _onGpuReady(); _onGpuReady = null; }
+    if (_onChainDone) { _onChainDone(); _onChainDone = null; }
+  };
+
+  _accelProviders.forEach((provider, pi) => {
+    provider.getDevices((err, devices) => {
+      if (err || !devices) {
+        dbg(provider.label + ' getDevices error: ' + (err?.message || 'no data'));
+        providerResults[pi] = { devices: [], procInfo: null };
+        pending--;
+        if (pending <= 0) finalizeAggregation();
+        return;
+      }
+      // Get proc info after devices are known
+      provider.getProcInfo((err2, procInfo) => {
+        providerResults[pi] = { devices, procInfo: procInfo || { map: {}, myIndices: [] } };
+        pending--;
+        if (pending <= 0) finalizeAggregation();
+      });
+    });
   });
 }
 
 function getAllGpus() {
+  if (!_accelInitialized) detectProviders();
   refreshGpuChain();
   if (_gpuCacheTime > 0 && Date.now() - _gpuCacheTime > GPU_CACHE_TTL) { _gpuCache = []; _gpuCacheTime = 0; }
   return _gpuCache;
 }
+
+function getAccelEnvVar(devices) {
+  // Return the env var name for the first detected provider type
+  if (!devices || !devices.length) return 'CUDA_VISIBLE_DEVICES';
+  const type = devices[0].type || 'nvidia';
+  const provider = ALL_PROVIDERS.find(p => p.type === type);
+  return provider ? provider.envVar : 'CUDA_VISIBLE_DEVICES';
+}
+
+function getAccelProviders() { return _accelProviders; }
 
 function getSshTraffic() {
   if (!isSSH) return { isSSH: false };
@@ -598,7 +1002,7 @@ function getWebviewHtml(nonce, initCfg) {
 </div>
 
 <div class="card" id="free-gpu-card" style="display:none">
-  <div class="card-head"><span class="card-label">GPU</span><span class="card-value" id="gpu-summary">--</span></div>
+  <div class="card-head"><span class="card-label" id="gpu-card-label">加速设备</span><span class="card-value" id="gpu-summary">--</span></div>
   <div class="capsules" id="gpu-capsules"></div>
   <div class="capsule-actions" id="capsule-actions">
     <button class="action-btn" id="select-all-btn">全选空闲</button>
@@ -632,7 +1036,7 @@ function getWebviewHtml(nonce, initCfg) {
   function setLang(lang) {
     zh = lang && lang.startsWith('zh');
     T = zh
-      ? { min:' 分钟',cores:' 核',used:'已用',avail:'可用',total:'总计',srvNet:'服务器网络',net:'网络',localSSH:'本机 SSH',up:'↑ 上传',down:'↓ 下载',selAll:'全选空闲',clear:'清除',copyEnv:'复制环境变量',detecting:'检测中…',noGpu:'未检测到 NVIDIA GPU',updAt:'更新于 ',utilLabel:'利用率',memLabel:'显存',tempLabel:'温度',pwLabel:'功耗',
+      ? { min:' 分钟',cores:' 核',used:'已用',avail:'可用',total:'总计',srvNet:'服务器网络',net:'网络',localSSH:'本机 SSH',up:'↑ 上传',down:'↓ 下载',selAll:'全选空闲',clear:'清除',copyEnv:'复制环境变量',detecting:'检测中…',noGpu:'未检测到加速设备',updAt:'更新于 ',utilLabel:'利用率',memLabel:'显存',tempLabel:'温度',pwLabel:'功耗',accelLabel:'加速设备',
           perfTab:'性能',procTab:'进程',settBtn:'设置',running:'运行中',stopped:'已暂停',enabled:'已开启',disabled:'已关闭',settTitle:'设置',interval:'刷新间隔',statusBar:'状态栏',barToggle:'显示状态栏',barAlign:'位置',barPriority:'优先级',barPriorityTip:'数字越大越靠左（左侧）或越靠右（右侧），默认 10',close:'关闭',
           netLabel:'网络速率',gpuLabel:'GPU',
           scopeOff:'关',scopeSummary:'总览',scopeCard:'指定卡',scopeMy:'我的卡',metUtil:'仅利用率',metVram:'仅显存',metBoth:'全部显示',
@@ -641,7 +1045,7 @@ function getWebviewHtml(nonce, initCfg) {
           diskLabel:'磁盘',diskUsage:'磁盘容量',diskIO:'磁盘速率',diskIORead:'仅读',diskIOWrite:'仅写',diskNoData:'无磁盘数据',diskFilter:'挂载过滤',diskDefault:'默认',diskMore:'更多',diskAll:'全部',diskCustom:'自定义',diskShowVirtual:'排除虚拟 FS',diskShowVirtualTip:'tmpfs, sysfs, proc, devtmpfs 等',diskExcludeFs:'排除 FS 类型',diskExcludeFsTip:'如 vfat, ntfs, fuse 等文件系统类型',diskExcludePath:'排除路径前缀',diskExcludePathTip:'如 /proc, /sys, /run 等挂载路径',diskHideParent:'仅显示叶子挂载点',diskHideParentTip:'例: /autodl-fs 和 /autodl-fs/data 同时存在时只显示 /autodl-fs/data（适用于 AutoDL 等平台）',
           displayLabel:'显示',chartsToggle:'卡片背景图表',sparkLabel:'图表时长',tabularNums:'等宽数字',tabularNumsTip:'所有数字宽度一致，布局更稳定，但可能显得略宽松',
           pcpu:'CPU',pmem:'内存',pgpu:'GPU',ppid:'PID',puser:'用户',pname:'进程名',pcpuPct:'CPU%',pmemCol:'内存',pgpuCol:'GPU',pcount:'共 {n} 进程',pnoGpu:'—',pcmd:'命令',filterHint:'搜索进程...' }
-      : { min:' min',cores:' cores',used:'Used',avail:'Avail',total:'Total',srvNet:'Server Net',net:'Network',localSSH:'Local SSH',up:'↑ Up',down:'↓ Down',selAll:'Select All',clear:'Clear',copyEnv:'Copy Env Var',detecting:'Detecting…',noGpu:'No NVIDIA GPU detected',updAt:'Updated ',utilLabel:'Util',memLabel:'VRAM',tempLabel:'Temp',pwLabel:'Power',
+      : { min:' min',cores:' cores',used:'Used',avail:'Avail',total:'Total',srvNet:'Server Net',net:'Network',localSSH:'Local SSH',up:'↑ Up',down:'↓ Down',selAll:'Select All',clear:'Clear',copyEnv:'Copy Env Var',detecting:'Detecting…',noGpu:'No accelerator detected',updAt:'Updated ',utilLabel:'Util',memLabel:'VRAM',tempLabel:'Temp',pwLabel:'Power',accelLabel:'Accelerator',
           perfTab:'Perf',procTab:'Procs',settBtn:'Settings',running:'Running',stopped:'Paused',enabled:'Enabled',disabled:'Disabled',settTitle:'Settings',interval:'Refresh Interval',statusBar:'Status Bar',barToggle:'Show Status Bar',barAlign:'Position',barPriority:'Priority',barPriorityTip:'Higher = closer to the edge. Default: 10',close:'Close',
           netLabel:'Network',gpuLabel:'GPU',
           scopeOff:'Off',scopeSummary:'Summary',scopeCard:'Card',scopeMy:'My Card',metUtil:'Util Only',metVram:'VRAM Only',metBoth:'All',
@@ -805,6 +1209,14 @@ function getWebviewHtml(nonce, initCfg) {
 
     var gpuBody = document.getElementById('gpu-body');
     if (d.gpus && d.gpus.length) {
+      lastGpuData = d.gpus;
+      var gpuLabelEl2 = document.getElementById('gpu-card-label');
+      if (gpuLabelEl2) {
+        var types = {};
+        d.gpus.forEach(function(g) { types[g.devType || 'GPU'] = true; });
+        var typeStr = Object.keys(types).join('/');
+        gpuLabelEl2.textContent = typeStr;
+      }
       var gpuKeys = d.gpus.map(function(g) { return g.idx; });
       var gpuSame = gpuKeys.length === _gpuKeys.length && gpuKeys.every(function(k, i) { return k === _gpuKeys[i]; });
       d.gpus.forEach(function(g) {
@@ -821,7 +1233,7 @@ function getWebviewHtml(nonce, initCfg) {
           var memPct = Math.min(100, Math.round(mu / mt * 100));
           ghtml += '<div class="gpu-mini" style="position:relative;overflow:hidden">'
             + '<svg class="spark-bg" id="gpu-spark-' + g.idx + '" viewBox="0 0 100 100" preserveAspectRatio="none"><path id="gpu-spark-area-' + g.idx + '" /></svg>'
-            + '<div class="gpu-title"><span class="gpu-name">GPU ' + g.idx + '</span><span class="gpu-sub" title="' + g.name + '"><bdo dir="ltr">' + g.name + '</bdo></span></div>'
+            + '<div class="gpu-title"><span class="gpu-name">' + (g.devType || 'GPU') + ' ' + g.idx + '</span><span class="gpu-sub" title="' + g.name + '"><bdo dir="ltr">' + g.name + '</bdo></span></div>'
             + '<div class="bar-label"><span>' + T.utilLabel + '</span><span id="gpu-util-text-' + g.idx + '"><b>' + util + '%</b> <span class="gpu-link" data-gpu-link="' + g.idx + '">&nearr; ' + T.viewProcs + '</span></span></div>'
             + '<div class="track"><div class="fill ' + colorClass(util) + '" id="gpu-util-' + g.idx + '"></div></div>'
             + '<div class="bar-label"><span>' + T.memLabel + '</span><span class="gpu-mem-wrap"><span class="ltr-ellipsis" id="gpu-mem-text-' + g.idx + '" title="' + mu + ' / ' + mt + ' MiB"><bdo dir="ltr">' + mu + ' / ' + mt + ' MiB</bdo></span><span class="gpu-pct" id="gpu-mem-pct-' + g.idx + '">' + memPct + '%</span></span></div>'
@@ -915,7 +1327,7 @@ function getWebviewHtml(nonce, initCfg) {
       caps.innerHTML = capsHtml;
       document.getElementById('gpu-summary').textContent = zh
         ? freeCount + ' 空闲 / ' + d.gpus.length + ' 张'
-        : freeCount + ' free / ' + d.gpus.length + ' GPUs';
+        : freeCount + ' free / ' + d.gpus.length + ' devices';
       updateCopyBtn();
       lastFreeIdxs = d.gpus.filter(function(g) {
         var u = parseInt(g.util) || 0;
@@ -925,7 +1337,9 @@ function getWebviewHtml(nonce, initCfg) {
     } else {
       freeCard.style.display = '';
       freeCard.querySelector('.card-head').style.marginBottom = '0';
-      document.getElementById('gpu-summary').textContent = d.gpuLoading ? (zh ? '加载中…' : 'Loading…') : (zh ? '无 GPU' : 'No GPU');
+      document.getElementById('gpu-summary').textContent = d.gpuLoading ? (zh ? '加载中…' : 'Loading…') : (zh ? '无加速设备' : 'No accelerator');
+      var gpuLabelEl = document.getElementById('gpu-card-label');
+      if (gpuLabelEl) gpuLabelEl.textContent = T.accelLabel || (zh ? '加速设备' : 'Accelerator');
       capsElem.style.display = 'none';
       actElem.style.display = 'none';
       gpuBody.style.display = 'none';
@@ -935,7 +1349,7 @@ function getWebviewHtml(nonce, initCfg) {
   });
 
   // ── GPU 胶囊 ──
-  var selectedGpus = {}, lastFreeIdxs = [];
+  var selectedGpus = {}, lastFreeIdxs = [], lastGpuData = [];
   function updateCopyBtn() { document.getElementById('copy-btn').disabled = Object.keys(selectedGpus).length === 0; }
   document.getElementById('gpu-capsules').addEventListener('click', function(e) {
     var btn = e.target;
@@ -959,7 +1373,12 @@ function getWebviewHtml(nonce, initCfg) {
   _copyBtn.addEventListener('click', function() {
     if (this.disabled) return;
     var ids = Object.keys(selectedGpus).map(Number).sort(function(a,b){return a-b;}).join(',');
-    var ta = document.createElement('textarea'); ta.value = 'CUDA_VISIBLE_DEVICES=' + ids;
+    var envVarName = 'CUDA_VISIBLE_DEVICES';
+    if (lastGpuData && lastGpuData.length) {
+      var typeMap = {nvidia:'CUDA_VISIBLE_DEVICES', ascend:'ASCEND_RT_VISIBLE_DEVICES', amd:'ROCR_VISIBLE_DEVICES', intel:'INTEL_VISIBLE_DEVICES', tpu:'TPU_VISIBLE_DEVICES'};
+      envVarName = typeMap[lastGpuData[0].type] || 'CUDA_VISIBLE_DEVICES';
+    }
+    var ta = document.createElement('textarea'); ta.value = envVarName + '=' + ids;
     document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
   });
 
@@ -1532,14 +1951,9 @@ function refreshConfigFromSettings() {
   _cfgCache = _readSettingsOnce();
 }
 
-// ── GPU process data (populated by refreshGpuChain) ─────────────────────────
-let _uuidToIdx = {};        // gpu_uuid → index
-let _uuidToMem = {};        // gpu_uuid → memory.total
-let _gpuProcMap = {};       // pid → [{idx, vram, memTotal}]
-let _gpuMyIndices = [];     // GPU indices used by current user
-
+// ── Accelerator process data (populated by refreshGpuChain via providers) ────
 function getMyGpuIndices() {
-  return _gpuMyIndices;
+  return _accelMyIndices;
 }
 
 // ── 进程数据采集 ─────────────────────────────────────────────────────────────
@@ -1561,11 +1975,11 @@ function getProcessData() {
       }
     }
   } catch { }
-  // Apply cached GPU process data (refreshed by refreshGpuChain)
+  // Apply cached accelerator process data (refreshed by refreshGpuChain)
   for (const p of procs) {
-    if (_gpuProcMap[p.pid]) {
-      p.gpus = _gpuProcMap[p.pid];
-      p.vram = _gpuProcMap[p.pid].reduce((s, g) => s + g.vram, 0);
+    if (_accelProcMap[p.pid]) {
+      p.gpus = _accelProcMap[p.pid];
+      p.vram = _accelProcMap[p.pid].reduce((s, g) => s + g.vram, 0);
     }
   }
   return procs;
@@ -1633,7 +2047,7 @@ class MonitorViewProvider {
         disks = disks.filter(d => d.mount === '/' || !mounts.some(m => m !== d.mount && m.startsWith(d.mount + '/')));
       }
       // state-change logging
-      if (gpus.length !== _prevGpuCount) { dbg('GPU: ' + (gpus.length ? gpus.length + ' cards (' + gpus.map(g => g.name).join(', ') + ')' : 'none')); _prevGpuCount = gpus.length; }
+      if (gpus.length !== _prevGpuCount) { dbg('Accelerators: ' + (gpus.length ? gpus.length + ' devices (' + gpus.map(g => g.name + ' [' + (g.devType || g.type) + ']').join(', ') + ')' : 'none')); _prevGpuCount = gpus.length; }
       const sshNow = ssh.isSSH ? 1 : 0;
       if (sshNow !== _prevSshState) { dbg('SSH: ' + (sshNow ? 'session detected' : 'not in SSH')); _prevSshState = sshNow; }
       if (disks.length !== _prevDiskCount) { dbg('Disk: ' + disks.length + ' mounts'); _prevDiskCount = disks.length; }
