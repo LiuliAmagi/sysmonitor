@@ -1039,18 +1039,18 @@ function getWebviewHtml(nonce, initCfg) {
       ? { min:' 分钟',cores:' 核',used:'已用',avail:'可用',total:'总计',srvNet:'服务器网络',net:'网络',localSSH:'本机 SSH',up:'↑ 上传',down:'↓ 下载',selAll:'全选空闲',clear:'清除',copyEnv:'复制环境变量',detecting:'检测中…',noGpu:'未检测到加速设备',updAt:'更新于 ',utilLabel:'利用率',memLabel:'显存',tempLabel:'温度',pwLabel:'功耗',accelLabel:'加速设备',
           perfTab:'性能',procTab:'进程',settBtn:'设置',running:'运行中',stopped:'已暂停',enabled:'已开启',disabled:'已关闭',settTitle:'设置',interval:'刷新间隔',statusBar:'状态栏',barToggle:'显示状态栏',barAlign:'位置',barPriority:'优先级',barPriorityTip:'数字越大越靠左（左侧）或越靠右（右侧），默认 10',close:'关闭',
           netLabel:'网络速率',gpuLabel:'GPU',
-          scopeOff:'关',scopeSummary:'总览',scopeCard:'指定卡',scopeMy:'我的卡',metUtil:'仅利用率',metVram:'仅显存',metBoth:'全部显示',
+          scopeOff:'关',scopeSummary:'总览',scopeCard:'指定设备',scopeMy:'我的设备',metUtil:'仅利用率',metVram:'仅显存',metBoth:'全部显示',
           netUp:'仅上传',netDown:'仅下载',netAll:'全部显示',netMerge:'合并显示',
-          sshLabel:'SSH速率',gpuSummary:'GPU总览',gpuIdleIds:'显示空闲卡号',gpuPerf:'GPU性能显示',gpuAll:'所有卡',gpuSpecify:'指定卡',gpuFirst:'前几张',gpuMetric:'GPU显示指标',gpuSkipIdle:'隐藏空闲卡',viewProcs:'查看进程',
+          sshLabel:'SSH速率',gpuSummary:'设备总览',gpuIdleIds:'显示空闲设备号',gpuPerf:'设备性能显示',gpuAll:'所有设备',gpuSpecify:'指定设备',gpuFirst:'前几台',gpuMetric:'设备显示指标',gpuSkipIdle:'隐藏空闲设备',viewProcs:'查看进程',
           diskLabel:'磁盘',diskUsage:'磁盘容量',diskIO:'磁盘速率',diskIORead:'仅读',diskIOWrite:'仅写',diskNoData:'无磁盘数据',diskFilter:'挂载过滤',diskDefault:'默认',diskMore:'更多',diskAll:'全部',diskCustom:'自定义',diskShowVirtual:'排除虚拟 FS',diskShowVirtualTip:'tmpfs, sysfs, proc, devtmpfs 等',diskExcludeFs:'排除 FS 类型',diskExcludeFsTip:'如 vfat, ntfs, fuse 等文件系统类型',diskExcludePath:'排除路径前缀',diskExcludePathTip:'如 /proc, /sys, /run 等挂载路径',diskHideParent:'仅显示叶子挂载点',diskHideParentTip:'例: /autodl-fs 和 /autodl-fs/data 同时存在时只显示 /autodl-fs/data（适用于 AutoDL 等平台）',
           displayLabel:'显示',chartsToggle:'卡片背景图表',sparkLabel:'图表时长',tabularNums:'等宽数字',tabularNumsTip:'所有数字宽度一致，布局更稳定，但可能显得略宽松',
           pcpu:'CPU',pmem:'内存',pgpu:'GPU',ppid:'PID',puser:'用户',pname:'进程名',pcpuPct:'CPU%',pmemCol:'内存',pgpuCol:'GPU',pcount:'共 {n} 进程',pnoGpu:'—',pcmd:'命令',filterHint:'搜索进程...' }
       : { min:' min',cores:' cores',used:'Used',avail:'Avail',total:'Total',srvNet:'Server Net',net:'Network',localSSH:'Local SSH',up:'↑ Up',down:'↓ Down',selAll:'Select All',clear:'Clear',copyEnv:'Copy Env Var',detecting:'Detecting…',noGpu:'No accelerator detected',updAt:'Updated ',utilLabel:'Util',memLabel:'VRAM',tempLabel:'Temp',pwLabel:'Power',accelLabel:'Accelerator',
           perfTab:'Perf',procTab:'Procs',settBtn:'Settings',running:'Running',stopped:'Paused',enabled:'Enabled',disabled:'Disabled',settTitle:'Settings',interval:'Refresh Interval',statusBar:'Status Bar',barToggle:'Show Status Bar',barAlign:'Position',barPriority:'Priority',barPriorityTip:'Higher = closer to the edge. Default: 10',close:'Close',
           netLabel:'Network',gpuLabel:'GPU',
-          scopeOff:'Off',scopeSummary:'Summary',scopeCard:'Card',scopeMy:'My Card',metUtil:'Util Only',metVram:'VRAM Only',metBoth:'All',
+          scopeOff:'Off',scopeSummary:'Summary',scopeCard:'Specific',scopeMy:'My Devices',metUtil:'Util Only',metVram:'Mem Only',metBoth:'All',
           netUp:'Upload',netDown:'Download',netAll:'All',netMerge:'Merged',
-          sshLabel:'SSH Traffic',gpuSummary:'GPU Summary',gpuIdleIds:'Show Idle IDs',gpuPerf:'GPU Performance',gpuAll:'All Cards',gpuSpecify:'Specific',gpuFirst:'First N',gpuMetric:'GPU Metric',gpuSkipIdle:'Hide Idle',viewProcs:'View Procs',
+          sshLabel:'SSH Traffic',gpuSummary:'Device Summary',gpuIdleIds:'Show Idle IDs',gpuPerf:'Device Performance',gpuAll:'All Devices',gpuSpecify:'Specific',gpuFirst:'First N',gpuMetric:'Device Metric',gpuSkipIdle:'Hide Idle',viewProcs:'View Procs',
           diskLabel:'Disk',diskUsage:'Disk Usage',diskIO:'Disk I/O',diskIORead:'Read',diskIOWrite:'Write',diskNoData:'No disk data',diskFilter:'Mount Filter',diskDefault:'Default',diskMore:'More',diskAll:'All',diskCustom:'Custom',diskShowVirtual:'Exclude Virtual FS',diskShowVirtualTip:'tmpfs, sysfs, proc, devtmpfs, etc.',diskExcludeFs:'Exclude FS Type',diskExcludeFsTip:'e.g. vfat, ntfs, fuse',diskExcludePath:'Exclude Path Prefix',diskExcludePathTip:'e.g. /proc, /sys, /run',diskHideParent:'Leaf mounts only',diskHideParentTip:'e.g. if /autodl-fs and /autodl-fs/data both exist, only /autodl-fs/data is shown (useful on AutoDL, etc.)',
           displayLabel:'Display',chartsToggle:'Card Background Charts',sparkLabel:'Chart Duration',tabularNums:'Tabular Numbers',tabularNumsTip:'All digits have equal width for stable layout, but may appear slightly wider',
           pcpu:'CPU',pmem:'Memory',pgpu:'GPU',ppid:'PID',puser:'User',pname:'Process',pcpuPct:'CPU%',pmemCol:'Mem',pgpuCol:'GPU',pcount:'{n} processes',pnoGpu:'—',pcmd:'Command',filterHint:'Search...' };
@@ -1325,9 +1325,25 @@ function getWebviewHtml(nonce, initCfg) {
         capsHtml += '<button class="' + cls + '" data-idx="' + g.idx + '" data-free="' + (isFree?1:0) + '">' + g.idx + '</button>';
       });
       caps.innerHTML = capsHtml;
+      // Group by device type for per-type statistics
+      var typeGroups = {};
+      d.gpus.forEach(function(g) {
+        var dt = g.devType || 'GPU';
+        if (!typeGroups[dt]) typeGroups[dt] = { total: 0, free: 0 };
+        typeGroups[dt].total++;
+        var util = parseInt(g.util) || 0;
+        var memPct = g.memTotal > 0 ? Math.round((parseInt(g.memUsed) || 0) / g.memTotal * 100) : 0;
+        if (util < 5 && memPct < 10) typeGroups[dt].free++;
+      });
+      var typeKeys = Object.keys(typeGroups);
+      var summaryParts = typeKeys.map(function(dt) {
+        var g = typeGroups[dt];
+        return zh ? (dt + ' ' + g.free + '/' + g.total) : (dt + ' ' + g.free + '/' + g.total);
+      });
+      var totalFree = typeKeys.reduce(function(s, dt) { return s + typeGroups[dt].free; }, 0);
       document.getElementById('gpu-summary').textContent = zh
-        ? freeCount + ' 空闲 / ' + d.gpus.length + ' 张'
-        : freeCount + ' free / ' + d.gpus.length + ' devices';
+        ? totalFree + ' 空闲 / ' + d.gpus.length + ' 台 (' + summaryParts.join(', ') + ')'
+        : totalFree + ' free / ' + d.gpus.length + ' devices (' + summaryParts.join(', ') + ')';
       updateCopyBtn();
       lastFreeIdxs = d.gpus.filter(function(g) {
         var u = parseInt(g.util) || 0;
@@ -1550,7 +1566,7 @@ function getWebviewHtml(nonce, initCfg) {
 
     if (gpuMode === 'first') {
       var fv = gpu.firstN || 2;
-      h += '<div class="sett-row" style="margin-left:60px"><input class="sett-input" id="gpu-first-input" type="number" min="1" max="'+gpuCount+'" value="'+fv+'" style="width:50px" /><span style="font-size:10px;color:var(--muted);margin-left:4px">'+(zh?'张':'cards')+'</span></div>';
+      h += '<div class="sett-row" style="margin-left:60px"><input class="sett-input" id="gpu-first-input" type="number" min="1" max="'+gpuCount+'" value="'+fv+'" style="width:50px" /><span style="font-size:10px;color:var(--muted);margin-left:4px">'+(zh?'台':'units')+'</span></div>';
     }
 
     if (gpuMode === 'specify') {
@@ -1714,7 +1730,7 @@ function getWebviewHtml(nonce, initCfg) {
         if (!valid) { errEl.textContent = zh?'格式错误，请用逗号分隔数字':'Invalid format'; this.classList.add('err'); return; }
         this.classList.remove('err');
         var badCards = nums.filter(function(n){ return n >= gpuCount; });
-        errEl.textContent = badCards.length ? (zh?'卡 '+badCards.join(',')+' 不存在，将不显示':'Card '+badCards.join(',')+' not found') : '';
+        errEl.textContent = badCards.length ? (zh?'设备 '+badCards.join(',')+' 不存在，将不显示':'Device '+badCards.join(',')+' not found') : '';
         cfg.gpu.cards = nums.filter(function(n){ return n < gpuCount; });
         cfg.gpu.cards.sort(function(a,b){return a-b;});
         pushCfg();
@@ -2159,12 +2175,22 @@ function formatBarText(cfg, data) {
     if (gpu.summary) {
       let free = 0;
       const freeIds = [];
+      const typeCounts = {};
       data.gpus.forEach(g => {
         const u = parseInt(g.util) || 0;
         const mp = g.memTotal > 0 ? Math.round((parseInt(g.memUsed) || 0) / g.memTotal * 100) : 0;
-        if (u < 5 && mp < 10) { free++; freeIds.push(g.idx); }
+        const dt = g.devType || 'GPU';
+        if (!typeCounts[dt]) typeCounts[dt] = { total: 0, free: 0 };
+        typeCounts[dt].total++;
+        if (u < 5 && mp < 10) { free++; freeIds.push(g.idx); typeCounts[dt].free++; }
       });
-      let summaryText = '$(circuit-board) ' + free + '/' + data.gpus.length;
+      const dtKeys = Object.keys(typeCounts);
+      let summaryText;
+      if (dtKeys.length <= 1) {
+        summaryText = '$(circuit-board) ' + free + '/' + data.gpus.length;
+      } else {
+        summaryText = '$(circuit-board) ' + dtKeys.map(dt => dt + ' ' + typeCounts[dt].free + '/' + typeCounts[dt].total).join(' ');
+      }
       if (gpu.showIdleIds && freeIds.length > 0) summaryText += ' (' + freeIds.join(',') + ')';
       parts.push(summaryText);
       gpuIcon = true;
