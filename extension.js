@@ -477,7 +477,7 @@ const TpuProvider = {
           const cells = line.split(/[│|]/).map(s => s.trim()).filter(Boolean);
           if (cells.length >= 3) {
             const idx = parseInt(cells[0]);
-            if (!isNaN(idx)) {
+            if (!isNaN(idx) && !devices.find(d => d.idx === idx)) {
               const memParts = (cells[1] || '').match(/([\d.]+)\s*\w*\s*\/\s*([\d.]+)\s*(\w*)/);
               const memUsed = memParts ? parseFloat(memParts[1]) * (memParts[3]?.startsWith('G') ? 1024 : 1) : 0;
               const memTotal = memParts ? parseFloat(memParts[2]) * (memParts[3]?.startsWith('G') ? 1024 : 1) : 0;
@@ -528,14 +528,23 @@ function refreshGpuChain() {
     const allDevices = [];
     const allProcMaps = {};
     const allMyIndices = [];
+    const seenKeys = new Set();  // dedup safety net
     let globalOffset = 0;
     for (let pi = 0; pi < providerCount; pi++) {
       const result = providerResults[pi];
       const provider = _accelProviders[pi];
+      // Deduplicate within each provider by original idx
+      const seenLocal = new Set();
+      const uniqueDevices = [];
       for (const d of result.devices) {
+        if (!seenLocal.has(d.idx)) { seenLocal.add(d.idx); uniqueDevices.push(d); }
+        else { dbg('dedup: skip duplicate ' + provider.type + ' device idx=' + d.idx); }
+      }
+      for (const d of uniqueDevices) {
         d.idx = globalOffset + d.idx;
         d._providerType = provider.type;
-        allDevices.push(d);
+        const key = d._providerType + ':' + d.idx;
+        if (!seenKeys.has(key)) { seenKeys.add(key); allDevices.push(d); }
       }
       if (result.procInfo && result.procInfo.map) {
         for (const pid of Object.keys(result.procInfo.map)) {
@@ -548,7 +557,7 @@ function refreshGpuChain() {
       if (result.procInfo && result.procInfo.myIndices) {
         for (const i of result.procInfo.myIndices) allMyIndices.push(globalOffset + i);
       }
-      globalOffset += result.devices.length;
+      globalOffset += uniqueDevices.length;
     }
     _smiChainRunning = false;
     _gpuCache = allDevices;
