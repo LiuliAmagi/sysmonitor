@@ -196,29 +196,36 @@ function parseNpuSmiInfo(stdout) {
       const rawCells = t.split('|').map(s => s.trim()).filter(Boolean);
       // npu-smi table has 3 major columns; data fields within each column are space-separated
       if (rawCells.length >= 1 && /^\d/.test(rawCells[0])) {
-        const c1 = rawCells[0] || '';  // "NPU_ID NAME" or "CHIP_ID"
+        const c1 = rawCells[0] || '';  // "NPU_ID NAME" or "CHIP_ID [DEVICE_ID]"
         const c2 = rawCells[1] || '';  // "HEALTH" or "BUS_ID"
-        const c3 = rawCells[2] || '';  // "POWER TEMP HUGE_PAGES" or "AICORE MEM HBM"
-        const c1Parts = c1.split(/\s{2,}/);
+        const c3 = rawCells[2] || '';  // "POWER TEMP HUGE_PAGES" or "AICORE MEM [HBM]"
         // Normalize spaces around '/' to prevent ratio values from being split
         const splitFields = (s) => s.replace(/\s*\/\s*/g, '/').split(/\s{2,}/).map(x => x.trim());
-        if (c1Parts.length >= 2 && /^\d+$/.test(c1Parts[0].trim())) {
-          // First line of device: [NPU_ID, Name], [Health], [Power, Temp, Hugepages_or_Memory]
-          if (cur) devices.push(cur);
-          const name = c1Parts.slice(1).join(' ').trim();
-          const c3Fields = splitFields(c3);
-          const power = parseFloat(c3Fields[0]) || 0;
-          const temp = parseInt(c3Fields[1]) || 0;
-          const memStr = c3Fields[2] || '';
-          const memParts = memStr.split('/').map(s => parseInt(s.trim()) || 0);
-          cur = {
-            idx: parseInt(c1Parts[0].trim()), name: name || 'Ascend', util: 0,
-            memUsed: memParts[0] || 0, memTotal: memParts[1] || 0, temp,
-            power: { draw: power.toFixed(0), limit: '?' },
-            type: 'ascend', devType: 'NPU', uuid: '',
-          };
-        } else if (cur && /^\d+$/.test(c1.trim())) {
-          // Second line of device: [Chip_ID], [Bus_ID], [AICore%, Mem_Used/Mem_Total, HBM_Used/HBM_Total]
+        // Chip line: first cell contains only digits. On 910B it is a single chip id ("0");
+        // on 310P it is chip id + device id ("0       0").
+        const isChipLine = /^\d+(\s+\d+)?$/.test(c1.trim());
+        if (!isChipLine) {
+          const c1Parts = c1.split(/\s{2,}/);
+          if (c1Parts.length >= 2 && /^\d+$/.test(c1Parts[0].trim())) {
+            // First line of device: [NPU_ID, Name], [Health], [Power, Temp, Hugepages_or_Memory]
+            if (cur) devices.push(cur);
+            const name = c1Parts.slice(1).join(' ').trim();
+            const c3Fields = splitFields(c3);
+            const powerNum = parseFloat(c3Fields[0] || '');
+            const temp = parseInt(c3Fields[1]) || 0;
+            const memStr = c3Fields[2] || '';
+            const memParts = memStr.split('/').map(s => parseInt(s.trim()) || 0);
+            cur = {
+              idx: parseInt(c1Parts[0].trim()), name: name || 'Ascend', util: 0,
+              memUsed: memParts[0] || 0, memTotal: memParts[1] || 0, temp,
+              power: isNaN(powerNum) ? null : { draw: powerNum.toFixed(0), limit: '?' },
+              type: 'ascend', devType: 'NPU', uuid: '',
+              _cardId: parseInt(c1Parts[0].trim()), _chipId: 0,
+            };
+          }
+        } else if (cur) {
+          // Second line of device: [Chip_ID (Device_ID)], [Bus_ID], [AICore%, Mem_Used/Mem_Total, (HBM_Used/HBM_Total)]
+          cur._chipId = parseInt(c1.trim().split(/\s+/)[0]) || 0;
           const c3Fields = splitFields(c3);
           const aiCore = parseInt(c3Fields[0]) || 0;
           if (aiCore > 0) cur.util = aiCore;
@@ -236,12 +243,12 @@ function parseNpuSmiInfo(stdout) {
     if (kvMatch) {
       const [, k, v] = kvMatch;
       const key = k.trim(), val = v.trim();
-      if (key === 'NPU ID') { if (cur) devices.push(cur); cur = { idx: parseInt(val), name: 'Ascend', util: 0, memUsed: 0, memTotal: 0, temp: 0, power: null, type: 'ascend', devType: 'NPU', uuid: '' }; }
+      if (key === 'NPU ID') { if (cur) devices.push(cur); cur = { idx: parseInt(val), name: 'Ascend', util: 0, memUsed: 0, memTotal: 0, temp: 0, power: null, type: 'ascend', devType: 'NPU', uuid: '', _cardId: parseInt(val), _chipId: 0 }; }
       if (cur) {
         if (key === 'NPU Name' || key === 'Product Name') cur.name = val;
         if (key === 'AI Core(%)' || key === 'AICore(%)') cur.util = parseInt(val) || 0;
         if (key === 'Temperature(C)' || key === 'Temp(C)') cur.temp = parseInt(val) || 0;
-        if (key === 'Power(W)' || key === 'Power') cur.power = { draw: (parseFloat(val) || 0).toFixed(0), limit: '?' };
+        if (key === 'Power(W)' || key === 'Power') { const pn = parseFloat(val); cur.power = isNaN(pn) ? null : { draw: pn.toFixed(0), limit: '?' }; }
         if (key.includes('HBM-Usage') || key.includes('Memory-Usage')) {
           const mp = val.split('/').map(s => parseInt(s.trim()) || 0);
           if (mp.length >= 2) { cur.memUsed = mp[0]; cur.memTotal = mp[1]; }
@@ -250,7 +257,60 @@ function parseNpuSmiInfo(stdout) {
     }
   }
   if (cur) devices.push(cur);
+  // Some models (e.g. Atlas 310P, npu-smi 24.x) report physical card IDs (e.g. 1536)
+  // instead of 0-based device IDs, and multiple chips may share the same card ID.
+  // The runtime exposes devices as davinci0..N-1, so renumber to sequential IDs
+  // whenever the reported IDs are not already 0..n-1.
+  if (devices.length && devices.some((d, i) => d.idx !== i)) {
+    devices.forEach((d, i) => { d.idx = i; });
+  }
   return devices;
+}
+
+// Known per-chip power limits (W), same table as nputop (ascend-nputop).
+// npu-smi does not expose a power limit, so these are model-based values.
+const ASCEND_POWER_LIMITS = {
+  '310P1': 90, '310P3': 72,
+  '910A': 310, '910B': 265, '910B1': 430, '910B2': 420, '910B3': 350, '910B4': 310, '910C': 350,
+};
+
+function applyAscendPowerLimits(devices) {
+  for (const d of devices) {
+    if (!d.power) continue;
+    const last = (d.name || '').split(/\s+/).pop();
+    const limit = ASCEND_POWER_LIMITS[d.name] !== undefined ? ASCEND_POWER_LIMITS[d.name] : ASCEND_POWER_LIMITS[last];
+    d.power.limit = limit !== undefined ? String(limit) : '?';
+  }
+}
+
+// Boards like Atlas 310P report Power(W)=NA in the summary table but still expose
+// real-time power via `npu-smi info -t power -i <card>` (same approach as nputop).
+// Query each affected card once (covering all its chips) and fill in the values.
+function enrichAscendPower(devices, done) {
+  applyAscendPowerLimits(devices);
+  const naCards = new Map();
+  for (const d of devices) {
+    if (!d.power && d._cardId !== undefined) {
+      if (!naCards.has(d._cardId)) naCards.set(d._cardId, []);
+      naCards.get(d._cardId).push(d);
+    }
+  }
+  if (naCards.size === 0) return done();
+  let pending = naCards.size;
+  for (const [cardId, devs] of naCards) {
+    execFile('npu-smi', ['info', '-t', 'power', '-i', String(cardId)], { timeout: 5000 }, (err, stdout) => {
+      if (!err && stdout) {
+        const powers = [...String(stdout).matchAll(/NPU Real-time Power\(W\)\s*:\s*([\d.]+)/g)].map(m => parseFloat(m[1]));
+        const chips = [...String(stdout).matchAll(/Chip ID\s*:\s*(\d+)/g)].map(m => parseInt(m[1]));
+        for (let i = 0; i < powers.length; i++) {
+          const d = (chips.length === powers.length && devs.find(x => x._chipId === chips[i])) || devs[i];
+          if (d && !isNaN(powers[i]) && !d.power) d.power = { draw: powers[i].toFixed(0), limit: '?' };
+        }
+        applyAscendPowerLimits(devs);
+      }
+      if (--pending <= 0) done();
+    });
+  }
 }
 
 const AscendProvider = {
@@ -261,7 +321,9 @@ const AscendProvider = {
   getDevices(cb) {
     execFile('npu-smi', ['info'], { timeout: 15000 }, (err, stdout) => {
       if (err) return cb(err, []);
-      try { cb(null, parseNpuSmiInfo(stdout || '')); } catch (e) { cb(e, []); }
+      let devices;
+      try { devices = parseNpuSmiInfo(stdout || ''); } catch (e) { return cb(e, []); }
+      enrichAscendPower(devices, () => cb(null, devices));
     });
   },
   getProcInfo(cb) {
