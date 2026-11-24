@@ -108,7 +108,7 @@ test('SSH default-install action is explicit, deduplicated, and writes the globa
   assert.equal(commandsOf(view.messages, 'config')[0].sshDefaultInstalled, false);
   assert.deepEqual(vscode.fake.settingWrites, []);
   await view.receive({ version: 1, cmd: 'addSshDefaultExtension' });
-  assert.deepEqual(vscode.fake.settingWrites, [{ section: 'remote.SSH', key: 'defaultExtensions', value: ['example.other-extension', 'LiChenxi.sysmonitor'], target: true }]);
+  assert.deepEqual(vscode.fake.settingWrites, [{ section: 'remote.SSH', key: 'defaultExtensions', value: ['example.other-extension', 'LiuliAmagi.sysmonitor'], target: true }]);
   assert.deepEqual(view.messages.at(-1), { cmd: 'sshDefaultExtensions', installed: true });
   await view.receive({ version: 1, cmd: 'addSshDefaultExtension' });
   assert.equal(vscode.fake.settingWrites.length, 1);

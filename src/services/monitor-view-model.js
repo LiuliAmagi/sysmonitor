@@ -60,6 +60,7 @@ function buildGpuModels(acceleratorData, processes, current = true) {
     const { usedBytes, totalBytes } = device.memory;
     return {
       idx: device.nativeIndex,
+      provider: device.provider || 'nvidia',
       name: device.name,
       displayName: displayDeviceName(device.name),
       isMine: currentUserDeviceKeys.has(device.deviceKey),

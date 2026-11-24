@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.6.1 — 2026-11-24 (fork: LiuliAmagi/sysmonitor, based on upstream 1.6.0)
+
+- Add Huawei Ascend NPU support through a new accelerator provider (`npu-smi`): AI Core utilization, HBM/system memory, temperature, and power, integrated into the existing idle-card, ownership, and process-link flows.
+- Parse both `npu-smi info` layouts: the shared device/chip table (910 series and Atlas 310P) and per-device key-value output (`npu-smi info -i N`).
+- Renumber physical card IDs reported by newer `npu-smi` versions (for example Atlas 310P on 310P-opi reporting card 1536 under npu-smi 24.1.rc4.b999) to the sequential runtime device IDs exposed as `davinci0..N-1`, including cards that share one physical ID across chips.
+- Fill in missing power readings per card via `npu-smi info -t power -i <card>` for boards such as Atlas 310P that report `NA` in the summary table, and apply known per-model power limits (310P1/310P3/910A/910B/910C) since `npu-smi` does not expose them.
+- Identify NPU occupancy and current-user cards from `npu-smi info -t proc`, matching process rows to the correct chip of a shared physical card; unavailable per-process NPU memory stays unknown instead of zero.
+- Copy idle-card selections as `ASCEND_RT_VISIBLE_DEVICES` when the selected accelerator is an Ascend NPU, and label Ascend cards as NPU in the performance view.
+
 ## 1.6.0 — 2026-11-16
 
 - Add Traditional Chinese support across the monitor, extension settings, and documentation.

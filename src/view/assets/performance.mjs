@@ -6,6 +6,8 @@ import { updateTopbarLayout } from './layout.mjs';
 import { createTooltip } from './popover.mjs';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+// Per-provider environment variable used by the idle-card copy action.
+const VISIBLE_DEVICES_ENV_BY_PROVIDER = { nvidia: 'CUDA_VISIBLE_DEVICES', ascend: 'ASCEND_RT_VISIBLE_DEVICES' };
 const RESET_TEXT_IDS = ['cpu-val', 'mem-val', 'mem-used', 'mem-avail', 'mem-total', 'load-1', 'load-5', 'load-15', 'net-tx', 'net-rx', 'ssh-tx', 'ssh-rx', 'ssh-latency', 'disk-io-val', 'gpu-summary', 'updated'];
 const TOOLTIP_PLACEMENT = { side: 'above', gap: 6 };
 // Rounding can leave a fitted user line this much wider than its box.
@@ -122,7 +124,7 @@ function createGpuCard(gpu) {
   const name = element('bdo');
   name.dir = 'ltr';
   nameWrap.append(name);
-  title.append(element('span', 'gpu-name', 'GPU ' + gpu.idx), nameWrap);
+  title.append(element('span', 'gpu-name', (gpu.provider === 'ascend' ? 'NPU ' : 'GPU ') + gpu.idx), nameWrap);
   const utilRow = element('div', 'bar-label');
   const utilValue = element('span');
   const utilText = element('b');
@@ -609,8 +611,12 @@ export function initializePerformance({ viewGpuProcesses }) {
   });
   copyButton.addEventListener('click', () => {
     if (copyButton.disabled) return;
-    const ids = Object.keys(selectedGpus).map(Number).sort((a, b) => a - b).join(',');
-    copyText('CUDA_VISIBLE_DEVICES=' + ids).then((copied) => {
+    const selected = Object.keys(selectedGpus).map(Number).sort((a, b) => a - b);
+    const ids = selected.join(',');
+    // A selection that mixes accelerator vendors falls back to the NVIDIA variable.
+    const providers = new Set(selected.map((index) => currentGpus().find((gpu) => gpu.idx === index)?.provider || 'nvidia'));
+    const envVar = providers.size === 1 ? (VISIBLE_DEVICES_ENV_BY_PROVIDER[[...providers][0]] || 'CUDA_VISIBLE_DEVICES') : 'CUDA_VISIBLE_DEVICES';
+    copyText(envVar + '=' + ids).then((copied) => {
       copyButton.textContent = copied ? tr('copyEnv') : tr('copyFailed');
     });
   });
