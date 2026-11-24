@@ -160,8 +160,6 @@ NVIDIA GPU 指标需要被监控机器上的 `nvidia-smi` 能正常运行，华�
 
 版本变化见[更新记录](CHANGELOG.md)。
 
-## 贡献者
-
 <a href="https://github.com/lcx-0504" title="作者"><img src="https://github.com/lcx-0504.png" width="50" style="border-radius:50%" alt="lcx-0504"/></a>
 <a href="https://github.com/klay7w" title="协助修复 GPU 刷新稳定性与侧栏长时间隐藏后不重绘的问题"><img src="https://github.com/klay7w.png" width="50" style="border-radius:50%" alt="klay7w"/></a>
 <a href="https://github.com/Steve2457" title="提出 tmux/screen 会话支持"><img src="https://github.com/Steve2457.png" width="50" style="border-radius:50%" alt="Steve2457"/></a>
