@@ -5,3 +5,6 @@ tmp
 .vscode/
 .trash/
 .claude/
+
+# pi session data
+.unipi/
