@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add AMD GPU support through a new accelerator provider. Card metrics come straight from the `amdgpu` driver's sysfs interface (`gpu_busy_percent`, VRAM size, hwmon temperature and power sensors), so utilization, memory, temperature, and power are available without any ROCm tooling, locally and over SSH.
+- Read AMD board names from the kernel `product_name` node, falling back to the market name reported by `amd-smi static` (queried once per card) and to the PCI device id when neither is available.
+- Identify AMD GPU occupancy and owners from the ROCm process listings (`rocm-smi --showpids` or `amd-smi process`), matching processes to cards by PCI slot or ROCm index; without those tools the card metrics stay visible and the idle count remains unknown.
+- Copy idle-card selections as `HIP_VISIBLE_DEVICES` when the selected accelerator is an AMD GPU.
+
 ## 1.6.1 — 2026-11-24 (fork: LiuliAmagi/sysmonitor, based on upstream 1.6.0)
 
 - Add Huawei Ascend NPU support through a new accelerator provider (`npu-smi`): AI Core utilization, HBM/system memory, temperature, and power, integrated into the existing idle-card, ownership, and process-link flows.

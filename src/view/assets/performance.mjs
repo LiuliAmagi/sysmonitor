@@ -7,7 +7,7 @@ import { createTooltip } from './popover.mjs';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // Per-provider environment variable used by the idle-card copy action.
-const VISIBLE_DEVICES_ENV_BY_PROVIDER = { nvidia: 'CUDA_VISIBLE_DEVICES', ascend: 'ASCEND_RT_VISIBLE_DEVICES' };
+const VISIBLE_DEVICES_ENV_BY_PROVIDER = { nvidia: 'CUDA_VISIBLE_DEVICES', amd: 'HIP_VISIBLE_DEVICES', ascend: 'ASCEND_RT_VISIBLE_DEVICES' };
 const RESET_TEXT_IDS = ['cpu-val', 'mem-val', 'mem-used', 'mem-avail', 'mem-total', 'load-1', 'load-5', 'load-15', 'net-tx', 'net-rx', 'ssh-tx', 'ssh-rx', 'ssh-latency', 'disk-io-val', 'gpu-summary', 'updated'];
 const TOOLTIP_PLACEMENT = { side: 'above', gap: 6 };
 // Rounding can leave a fitted user line this much wider than its box.

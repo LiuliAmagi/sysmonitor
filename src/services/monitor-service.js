@@ -6,6 +6,7 @@ const { DiskTopologyCollector } = require('../collectors/disk-topology-collector
 const { ProcessCollector } = require('../collectors/process-collector');
 const { SshTrafficCollector } = require('../collectors/ssh-traffic-collector');
 const { NvidiaProvider } = require('../accelerators/nvidia-provider');
+const { AmdProvider } = require('../accelerators/amd-provider');
 const { AscendProvider } = require('../accelerators/ascend-provider');
 const { CollectorRunner } = require('../core/collector-runner');
 const { CommandRunner } = require('../core/command-runner');
@@ -43,7 +44,7 @@ class MonitorService {
       const snapshot = this.snapshotStore.read();
       return { totalMemoryBytes: snapshot.memory.value?.totalBytes, coreCount: snapshot.cpu.value?.coreCount };
     };
-    const providers = acceleratorProviders || [new NvidiaProvider({ commandRunner: this.commandRunner, systemInfo }), new AscendProvider({ commandRunner: this.commandRunner, systemInfo })];
+    const providers = acceleratorProviders || [new NvidiaProvider({ commandRunner: this.commandRunner, systemInfo }), new AmdProvider({ commandRunner: this.commandRunner, systemInfo }), new AscendProvider({ commandRunner: this.commandRunner, systemInfo })];
     const definitions = [
       ['resources', new ResourceCollector({ commandRunner: this.commandRunner })],
       ['sshTraffic', new SshTrafficCollector({ commandRunner: this.commandRunner, isSsh, clientIp: sshClientIp, connectionInfo: sshConnectionInfo, onLog })],

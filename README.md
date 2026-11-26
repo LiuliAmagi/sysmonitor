@@ -58,13 +58,13 @@ Chart duration, visible resource groups, and background charts are configurable.
 
 ### GPU monitoring and idle-card selection
 
-GPU cards display utilization, VRAM, temperature, power, and utilization trends. The GPU overview uses occupation-process information to identify idle cards and supports card selection with a copyable environment variable (`CUDA_VISIBLE_DEVICES` for NVIDIA GPUs, `ASCEND_RT_VISIBLE_DEVICES` for Ascend NPUs).
+GPU cards display utilization, VRAM, temperature, power, and utilization trends. The GPU overview uses occupation-process information to identify idle cards and supports card selection with a copyable environment variable (`CUDA_VISIBLE_DEVICES` for NVIDIA GPUs, `HIP_VISIBLE_DEVICES` for AMD GPUs, `ASCEND_RT_VISIBLE_DEVICES` for Ascend NPUs).
 
 GPU measurements remain visible if the process query fails. When occupancy is unknown, the idle count shows `--` and the affected cards cannot be selected.
 
 GPUs used by the current user have a border in the editor's accent color. User labels show per-user VRAM usage, with the full user list available on hover. User labels and ownership highlighting can be disabled independently.
 
-**View Procs** opens the process list for a GPU. NVIDIA monitoring requires `nvidia-smi` on the monitored machine. Huawei Ascend NPUs are monitored through `npu-smi` and shown as NPU cards with AI Core utilization, memory, temperature, and power (queried per card for boards such as Atlas 310P that report power only in real time); per-process NPU memory is not reported by `npu-smi`. An idle GPU has no occupying tasks in the collected compute-process list.
+**View Procs** opens the process list for a GPU. NVIDIA monitoring requires `nvidia-smi` on the monitored machine. AMD GPUs are read from the `amdgpu` driver's sysfs interface, so utilization, VRAM, board temperature, and power work without any additional tool; the occupying process list comes from the ROCm tools (`rocm-smi --showpids` or `amd-smi process`), and without them the cards stay visible with an unknown idle state. Huawei Ascend NPUs are monitored through `npu-smi` and shown as NPU cards with AI Core utilization, memory, temperature, and power (queried per card for boards such as Atlas 310P that report power only in real time); per-process NPU memory is not reported by `npu-smi`. An idle GPU has no occupying tasks in the collected compute-process list.
 
 ### Process list
 
@@ -134,7 +134,7 @@ If connection multiplexing is unavailable or non-interactive access still fails,
 
 ### GPU, SSH, or process information is unavailable
 
-Check that `nvidia-smi` works on the monitored machine for NVIDIA metrics, and that `npu-smi` works for Huawei Ascend NPU metrics. SSH traffic and latency require the Linux `ss` command and accessible TCP statistics. Missing optional metrics do not prevent other sections from working.
+Check that `nvidia-smi` works on the monitored machine for NVIDIA metrics, and that `npu-smi` works for Huawei Ascend NPU metrics. AMD GPU metrics only need the `amdgpu` driver, while the AMD process list needs `rocm-smi` or `amd-smi`. SSH traffic and latency require the Linux `ss` command and accessible TCP statistics. Missing optional metrics do not prevent other sections from working.
 
 With SSH connection multiplexing, traffic figures can include other sessions sharing the same TCP connection.
 
