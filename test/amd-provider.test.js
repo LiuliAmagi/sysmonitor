@@ -93,7 +93,7 @@ test('AMD parsing drops a card without any reading and rejects a truncated query
   assert.throws(() => parseAmdSysfsCards(card('1', 'card1', '0000:03:00.0', '37')), (error) => error.code === 'EINCOMPLETE');
 });
 
-test('the sysfs query only reports AMD DRM cards and skips other vendors', { skip: process.platform === 'win32' }, () => {
+test('the sysfs query skips other vendors and reads both power sensor names', { skip: process.platform === 'win32' }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sysmonitor-amd-'));
   const write = (file, value) => {
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
@@ -108,17 +108,26 @@ test('the sysfs query only reports AMD DRM cards and skips other vendors', { ski
   write('card1/device/mem_info_vram_total', '8589934592\n');
   write('card1/device/hwmon/hwmon3/temp1_input', '56000\n');
   write('card1/device/hwmon/hwmon3/power1_input', '110000000\n');
+  // Current kernels name the limit power1_cap; older ones use power1_max.
+  write('card1/device/hwmon/hwmon3/power1_cap', '300000000\n');
+  write('card4/device/vendor', '0x1002\n');
+  write('card4/device/uevent', 'DRIVER=amdgpu\nPCI_SLOT_NAME=0000:06:00.0\n');
+  write('card4/device/hwmon/hwmon1/temp1_input', '44000\n');
+  write('card4/device/hwmon/hwmon1/power1_average', '90000000\n');
+  write('card4/device/hwmon/hwmon1/power1_max', '0\n');
   write('card1-DP-1/status', 'connected\n');
   write('renderD128/dev', '226:128\n');
   try {
     const stdout = execFileSync('sh', [path.join(__dirname, '..', 'src', 'accelerators', 'amd-sysfs.sh')], { env: { ...process.env, SYSMON_DRM_ROOT: root } }).toString();
     const devices = parseAmdSysfsCards(stdout);
-    assert.deepEqual(devices.map((device) => device.cardName), ['card1']);
+    assert.deepEqual(devices.map((device) => device.cardName), ['card1', 'card4']);
     assert.equal(devices[0].busId, '0000:05:00.0');
     assert.equal(devices[0].utilizationPercent, 42);
     assert.deepEqual(devices[0].memory, { usedBytes: 1073741824, totalBytes: 8589934592 });
     assert.equal(devices[0].temperatureCelsius, 56);
-    assert.deepEqual(devices[0].power, { drawWatts: 110, limitWatts: null });
+    assert.deepEqual(devices[0].power, { drawWatts: 110, limitWatts: 300 });
+    // A limit of 0 means the board has no cap, so it stays unknown instead of showing 0 W.
+    assert.deepEqual(devices[1].power, { drawWatts: 90, limitWatts: null });
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

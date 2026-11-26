@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add AMD GPU support through a new accelerator provider. Card metrics come straight from the `amdgpu` driver's sysfs interface (`gpu_busy_percent`, VRAM size, hwmon temperature and power sensors), so utilization, memory, temperature, and power are available without any ROCm tooling, locally and over SSH.
+- Add AMD GPU support through a new accelerator provider. Card metrics come straight from the `amdgpu` driver's sysfs interface (`gpu_busy_percent`, VRAM size, hwmon temperature, power draw, and the power cap under either its current `power1_cap` or its older `power1_max` name), so utilization, memory, temperature, and power are available without any ROCm tooling, locally and over SSH. A board without a power cap keeps the limit unknown instead of showing 0 W.
 - Read AMD board names from the kernel `product_name` node, falling back to the market name reported by `amd-smi static` (queried once per card) and to the PCI device id when neither is available.
 - Identify AMD GPU occupancy and owners from the ROCm process listings (`rocm-smi --showpids` or `amd-smi process`), matching processes to cards by PCI slot or ROCm index; without those tools the card metrics stay visible and the idle count remains unknown.
 - Copy idle-card selections as `HIP_VISIBLE_DEVICES` when the selected accelerator is an AMD GPU.

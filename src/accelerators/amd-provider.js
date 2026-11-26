@@ -100,6 +100,8 @@ function parseAmdSysfsCards(raw) {
     if (totalBytes > 0) { memory.totalBytes = totalBytes; memory.usedBytes = usedBytes === null ? null : Math.min(usedBytes, totalBytes); }
     const utilizationPercent = optionalNumber(busy);
     const drawWatts = optionalWatts(power);
+    // A limit of 0 is what the driver reports when the board has no power cap.
+    const limitWatts = optionalWatts(powerLimit);
     if (utilizationPercent === null && !memory.totalBytes && !temperatures.length && drawWatts === null && !name && !pciDeviceId) continue;
     const stableId = busId || optionalText(cardName) || String(devices.length);
     devices.push({
@@ -110,7 +112,7 @@ function parseAmdSysfsCards(raw) {
       utilizationPercent,
       memory,
       temperatureCelsius: temperatures.length ? Math.round(temperatures[0]) : null,
-      power: drawWatts === null ? null : { drawWatts, limitWatts: optionalWatts(powerLimit) },
+      power: drawWatts === null ? null : { drawWatts, limitWatts: limitWatts > 0 ? limitWatts : null },
     });
   }
   return devices;
